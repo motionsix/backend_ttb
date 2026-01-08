@@ -38,6 +38,10 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  await testConnection();
+  try {
+    await testConnection();
+  } catch (error) {
+    console.error('Database connection error:', error.message);
+  }
 });
 
