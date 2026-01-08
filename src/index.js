@@ -3,6 +3,7 @@ import cors from 'cors';
 import { config } from 'dotenv';
 
 import apiRoutes from './routes/api.js';
+import { testConnection } from './config/database.js';
 
 // Load environment variables
 config();
@@ -35,7 +36,8 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  await testConnection();
 });
 
