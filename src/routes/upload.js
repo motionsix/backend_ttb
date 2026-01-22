@@ -81,9 +81,9 @@ router.post('/image', async (req, res) => {
     // Generate URL (relative path)
     const imageUrl = `/uploads/${filename}`;
 
-    // Update database
+    // Update database - บันทึก url_image และ playing_status = true
     await pool.execute(
-      'UPDATE users_new SET url_image = ? WHERE employee_id = ?',
+      'UPDATE users_new SET url_image = ?, playing_status = TRUE WHERE employee_id = ?',
       [imageUrl, employee_id]
     );
 
