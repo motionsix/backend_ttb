@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import apiRoutes from './routes/api.js';
 import authRoutes from './routes/auth.js';
 import uploadRoutes from './routes/upload.js';
+import importRoutes from './routes/import.js';
 import { testConnection } from './config/database.js';
 
 // Get directory path for ES modules
@@ -31,6 +32,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api', apiRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/import', importRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
