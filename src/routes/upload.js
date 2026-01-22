@@ -101,8 +101,12 @@ router.post('/image', async (req, res) => {
       url_image: imageUrl,
       user: {
         id: updatedUser[0].id,
+        dept_id: updatedUser[0].dept_id,
+        dept_descr: updatedUser[0].dept_descr,
         employee_id: updatedUser[0].employee_id,
-        name: updatedUser[0].name_employee,
+        employee_firstname: updatedUser[0].employee_firstname,
+        employee_lastname: updatedUser[0].employee_lastname,
+        employee_name: `${updatedUser[0].employee_firstname} ${updatedUser[0].employee_lastname}`,
         url_image: updatedUser[0].url_image
       }
     });
