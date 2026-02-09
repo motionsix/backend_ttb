@@ -26,8 +26,10 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'ttbwebar_db',
   waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
+  connectionLimit: 100,        // เพิ่มจาก 10 → 100
+  queueLimit: 1000,            // รอคิวได้ 1000 requests
+  acquireTimeout: 30000,       // timeout 30 วินาที
+  idleTimeout: 60000           // ปิด connection ที่ไม่ใช้หลัง 60 วินาที
 });
 
 // Test connection

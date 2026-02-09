@@ -14,8 +14,18 @@ const __dirname = path.dirname(__filename);
 const UPLOAD_DIR = path.join(__dirname, '../../uploads');
 
 // Create upload directory if not exists
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  }
+  // Test write permission
+  const testFile = path.join(UPLOAD_DIR, '.write-test');
+  fs.writeFileSync(testFile, 'test');
+  fs.unlinkSync(testFile);
+  console.log('✅ Upload directory ready:', UPLOAD_DIR);
+} catch (err) {
+  console.error('⚠️ Upload directory permission error:', err.message);
+  console.log('📁 Upload directory path:', UPLOAD_DIR);
 }
 
 /**
@@ -25,6 +35,9 @@ if (!fs.existsSync(UPLOAD_DIR)) {
  * Body: { employee_id: string, image: base64 string }
  */
 router.post('/image', async (req, res) => {
+  console.log(`[Upload] Request received from employee_id: ${req.body?.employee_id}`);
+  console.log(`[Upload] Image size: ${req.body?.image?.length || 0} chars`);
+  
   try {
     const { employee_id, image } = req.body;
 
@@ -50,11 +63,13 @@ router.post('/image', async (req, res) => {
     );
 
     if (users.length === 0) {
+      console.log(`[Upload] ❌ User not found: ${employee_id}`);
       return res.status(404).json({
         success: false,
         error: 'ไม่พบผู้ใช้'
       });
     }
+    console.log(`[Upload] ✅ User found: ${users[0].employee_firstname} ${users[0].employee_lastname}`);
 
     // Decode base64 image
     // Format: data:image/png;base64,xxxxx or just base64 string
@@ -74,9 +89,22 @@ router.post('/image', async (req, res) => {
     const filename = `${employee_id}_${timestamp}.${extension}`;
     const filepath = path.join(UPLOAD_DIR, filename);
 
-    // Save file
+    // Save file with error handling
     const buffer = Buffer.from(base64Data, 'base64');
-    fs.writeFileSync(filepath, buffer);
+    
+    try {
+      fs.writeFileSync(filepath, buffer);
+    } catch (writeError) {
+      console.error('File write error:', writeError.message);
+      console.error('Filepath:', filepath);
+      
+      // Return error with helpful message
+      return res.status(500).json({
+        success: false,
+        error: 'ไม่สามารถบันทึกไฟล์ได้ กรุณาติดต่อผู้ดูแลระบบ',
+        details: `Permission error: ${writeError.code}`
+      });
+    }
 
     // Generate URL (relative path)
     const imageUrl = `/uploads/${filename}`;
@@ -93,7 +121,8 @@ router.post('/image', async (req, res) => {
       [employee_id]
     );
 
-    console.log(`[Upload] Image saved: ${filename} for employee: ${employee_id}`);
+    console.log(`[Upload] ✅ Image saved: ${filename} for employee: ${employee_id}`);
+    console.log(`[Upload] ✅ Sending success response...`);
 
     res.json({
       success: true,
@@ -112,10 +141,12 @@ router.post('/image', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Upload error:', error);
+    console.error('[Upload] ❌ Error:', error.message);
+    console.error('[Upload] ❌ Stack:', error.stack);
     res.status(500).json({
       success: false,
-      error: 'เกิดข้อผิดพลาดในการอัพโหลด'
+      error: 'เกิดข้อผิดพลาดในการอัพโหลด',
+      details: error.message
     });
   }
 });

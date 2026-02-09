@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
 import { config } from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -20,9 +22,27 @@ config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Rate Limiter - ป้องกัน spam (1000 requests ต่อ 15 นาที ต่อ IP)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 นาที
+  max: 1000,                  // 1000 requests ต่อ window
+  message: { success: false, error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Upload Limiter - สำหรับ upload (จำกัด 50 uploads ต่อ 15 นาที ต่อ IP)
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, error: 'Upload limit exceeded, please try again later.' },
+});
+
 // Middleware
+app.use(compression());       // บีบอัด response ให้เร็วขึ้น
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));  // เพิ่ม limit สำหรับ base64 image
+app.use(limiter);             // Rate limiting
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Static files - serve uploaded images
@@ -31,7 +51,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Routes
 app.use('/api', apiRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/upload', uploadRoutes);
+app.use('/api/upload', uploadLimiter, uploadRoutes);  // จำกัด upload
 app.use('/api/import', importRoutes);
 
 // Health check
