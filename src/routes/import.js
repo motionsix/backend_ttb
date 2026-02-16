@@ -138,6 +138,39 @@ router.post('/csv', async (req, res) => {
 });
 
 /**
+ * DELETE /api/import/reset
+ * ล้างข้อมูลทั้งหมด (users_new ก่อน เพราะมี FK → users_data)
+ * แล้ว import ข้อมูลใหม่จาก CSV
+ */
+router.delete('/reset', async (req, res) => {
+  try {
+    // ลบ users_new ก่อน (มี FK reference ไป users_data)
+    const [deletedNew] = await pool.execute('DELETE FROM users_new');
+    console.log(`[Reset] Deleted ${deletedNew.affectedRows} rows from users_new`);
+
+    // ลบ users_data
+    const [deletedData] = await pool.execute('DELETE FROM users_data');
+    console.log(`[Reset] Deleted ${deletedData.affectedRows} rows from users_data`);
+
+    res.json({
+      success: true,
+      message: 'ล้างข้อมูลสำเร็จ',
+      deleted: {
+        users_new: deletedNew.affectedRows,
+        users_data: deletedData.affectedRows
+      }
+    });
+
+  } catch (error) {
+    console.error('Reset error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * GET /api/import/stats
  * ดูสถิติข้อมูลใน database
  */
