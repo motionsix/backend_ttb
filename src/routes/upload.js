@@ -37,6 +37,29 @@ function formatUser(row) {
 // Validate employee_id format (5 digits)
 const EMPLOYEE_ID_REGEX = /^\d{5}$/;
 
+// ===== ป้องกันดิสก์เต็ม =====
+const MAX_FILE_SIZE = 5 * 1024 * 1024;          // จำกัดรูปละ 5MB
+const MAX_UPLOADS_FOLDER_SIZE = 500 * 1024 * 1024; // จำกัด folder uploads ทั้งหมด 500MB
+
+// คำนวณขนาด folder uploads ทั้งหมด
+function getUploadsFolderSize() {
+  try {
+    if (!fs.existsSync(UPLOAD_DIR)) return 0;
+    const files = fs.readdirSync(UPLOAD_DIR);
+    let totalSize = 0;
+    for (const file of files) {
+      const filePath = path.join(UPLOAD_DIR, file);
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) totalSize += stat.size;
+      } catch { /* skip files that can't be read */ }
+    }
+    return totalSize;
+  } catch {
+    return 0;
+  }
+}
+
 // Create upload directory if not exists
 try {
   if (!fs.existsSync(UPLOAD_DIR)) {
@@ -129,14 +152,38 @@ router.post('/image', async (req, res) => {
       }
     }
 
+    // Decode base64 → buffer ก่อน เพื่อเช็คขนาด
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // ===== ป้องกันดิสก์เต็ม: เช็คขนาดไฟล์ =====
+    const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(2);
+    if (buffer.length > MAX_FILE_SIZE) {
+      console.log(`[Upload] ❌ File too large: ${fileSizeMB}MB (max ${MAX_FILE_SIZE / (1024 * 1024)}MB)`);
+      return res.status(413).json({
+        success: false,
+        error: `ไฟล์ใหญ่เกินไป (${fileSizeMB}MB) จำกัดสูงสุด ${MAX_FILE_SIZE / (1024 * 1024)}MB`
+      });
+    }
+
+    // ===== ป้องกันดิสก์เต็ม: เช็คพื้นที่ folder =====
+    const currentFolderSize = getUploadsFolderSize();
+    const currentFolderSizeMB = (currentFolderSize / (1024 * 1024)).toFixed(1);
+    if (currentFolderSize + buffer.length > MAX_UPLOADS_FOLDER_SIZE) {
+      console.error(`[Upload] ❌ Disk limit reached: ${currentFolderSizeMB}MB / ${MAX_UPLOADS_FOLDER_SIZE / (1024 * 1024)}MB`);
+      return res.status(507).json({
+        success: false,
+        error: 'พื้นที่เก็บรูปเต็ม กรุณาติดต่อผู้ดูแลระบบ'
+      });
+    }
+
+    console.log(`[Upload] 📦 File: ${fileSizeMB}MB | Folder: ${currentFolderSizeMB}MB / ${MAX_UPLOADS_FOLDER_SIZE / (1024 * 1024)}MB`);
+
     // Generate filename
     const timestamp = Date.now();
     const filename = `${employee_id}_${timestamp}.${extension}`;
     const filepath = path.join(UPLOAD_DIR, filename);
 
     // Save file with error handling
-    const buffer = Buffer.from(base64Data, 'base64');
-    
     try {
       fs.writeFileSync(filepath, buffer);
     } catch (writeError) {
