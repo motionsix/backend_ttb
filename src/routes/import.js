@@ -9,13 +9,17 @@ const router = Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Batch size สำหรับ insert/update ทีละกี่แถว
+const BATCH_SIZE = 500;
+
 /**
  * POST /api/import/csv
  * Import ข้อมูลพนักงานจาก CSV file ที่อยู่ใน src/data/
+ * รองรับข้อมูลขนาดใหญ่ (13,000+ rows) ด้วย batch processing
  */
 router.post('/csv', async (req, res) => {
   try {
-    const csvPath = path.join(__dirname, '../data/Mock Up_Manlist_Fly High_edit.csv');
+    const csvPath = path.join(__dirname, '../data/data.csv');
     
     if (!fs.existsSync(csvPath)) {
       return res.status(404).json({
@@ -34,6 +38,8 @@ router.post('/csv', async (req, res) => {
     let skipped = 0;
     const errors = [];
 
+    // Parse ข้อมูลทั้งหมดก่อน
+    const records = [];
     for (const line of dataLines) {
       if (!line.trim()) continue;
       
@@ -45,48 +51,80 @@ router.post('/csv', async (req, res) => {
       }
 
       const [employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief] = columns;
+      
+      // Validate employee_id
+      if (!employee_id || employee_id.length === 0) {
+        skipped++;
+        continue;
+      }
 
+      records.push({ employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief });
+    }
+
+    console.log(`[Import] Parsed ${records.length} records from CSV, processing in batches of ${BATCH_SIZE}...`);
+
+    // Batch processing ด้วย INSERT ... ON DUPLICATE KEY UPDATE
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const batch = records.slice(i, i + BATCH_SIZE);
+      
       try {
-        // Check if already exists
-        const [existing] = await pool.execute(
-          'SELECT id FROM users_data WHERE employee_id = ?',
-          [employee_id]
+        // สร้าง VALUES placeholders สำหรับ batch
+        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+        const values = batch.flatMap(r => [
+          r.employee_id, r.employee_firstname, r.employee_lastname,
+          r.dept_id, r.dept_descr, r.sub_chief
+        ]);
+
+        // INSERT ... ON DUPLICATE KEY UPDATE — ถ้ามีอยู่แล้วจะ update ข้อมูล
+        await pool.execute(
+          `INSERT INTO users_data (employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief)
+           VALUES ${placeholders}
+           ON DUPLICATE KEY UPDATE
+             employee_firstname = VALUES(employee_firstname),
+             employee_lastname = VALUES(employee_lastname),
+             dept_id = VALUES(dept_id),
+             dept_descr = VALUES(dept_descr),
+             sub_chief = VALUES(sub_chief)`,
+          values
         );
 
-        if (existing.length > 0) {
-          // Update existing
-          await pool.execute(
-            `UPDATE users_data SET 
-              employee_firstname = ?, 
-              employee_lastname = ?, 
-              dept_id = ?, 
-              dept_descr = ?, 
-              sub_chief = ?
-            WHERE employee_id = ?`,
-            [employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief, employee_id]
-          );
-        } else {
-          // Insert new
-          await pool.execute(
-            `INSERT INTO users_data (employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief]
-          );
-        }
-        
-        imported++;
+        imported += batch.length;
+        console.log(`[Import] Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} records processed (${imported}/${records.length})`);
       } catch (err) {
-        errors.push({ employee_id, error: err.message });
-        skipped++;
+        console.error(`[Import] Batch error at offset ${i}:`, err.message);
+        
+        // Fallback: ทำทีละ row สำหรับ batch ที่ error
+        for (const record of batch) {
+          try {
+            await pool.execute(
+              `INSERT INTO users_data (employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE
+                 employee_firstname = VALUES(employee_firstname),
+                 employee_lastname = VALUES(employee_lastname),
+                 dept_id = VALUES(dept_id),
+                 dept_descr = VALUES(dept_descr),
+                 sub_chief = VALUES(sub_chief)`,
+              [record.employee_id, record.employee_firstname, record.employee_lastname,
+               record.dept_id, record.dept_descr, record.sub_chief]
+            );
+            imported++;
+          } catch (rowErr) {
+            errors.push({ employee_id: record.employee_id, error: rowErr.message });
+            skipped++;
+          }
+        }
       }
     }
+
+    console.log(`[Import] ✅ Completed: ${imported} imported, ${skipped} skipped, ${errors.length} errors`);
 
     res.json({
       success: true,
       message: `Import completed`,
       imported,
       skipped,
-      total: dataLines.length,
+      total: records.length + skipped,
       errors: errors.length > 0 ? errors : undefined
     });
 
