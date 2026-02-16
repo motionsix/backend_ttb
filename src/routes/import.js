@@ -12,12 +12,28 @@ const __dirname = path.dirname(__filename);
 // Batch size สำหรับ insert/update ทีละกี่แถว
 const BATCH_SIZE = 500;
 
+// API Key สำหรับ import/reset (ป้องกันไม่ให้ใครก็เรียกได้)
+const IMPORT_API_KEY = process.env.IMPORT_API_KEY || 'ttb-import-2026';
+
+// Middleware: ตรวจสอบ API key
+function requireApiKey(req, res, next) {
+  const apiKey = req.headers['x-api-key'] || req.query.api_key;
+  if (apiKey !== IMPORT_API_KEY) {
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden: Invalid API key'
+    });
+  }
+  next();
+}
+
 /**
  * POST /api/import/csv
  * Import ข้อมูลพนักงานจาก CSV file ที่อยู่ใน src/data/
  * รองรับข้อมูลขนาดใหญ่ (13,000+ rows) ด้วย batch processing
+ * ต้องส่ง header: x-api-key
  */
-router.post('/csv', async (req, res) => {
+router.post('/csv', requireApiKey, async (req, res) => {
   try {
     const csvPath = path.join(__dirname, '../data/data.csv');
     
@@ -76,7 +92,9 @@ router.post('/csv', async (req, res) => {
         ]);
 
         // INSERT ... ON DUPLICATE KEY UPDATE — ถ้ามีอยู่แล้วจะ update ข้อมูล
-        await pool.execute(
+        // ใช้ pool.query() แทน pool.execute() เพราะ dynamic SQL (placeholders เปลี่ยนตาม batch size)
+        // pool.execute() จะสร้าง prepared statement ใหม่ทุกครั้งที่ SQL ต่างกัน = สิ้นเปลือง
+        await pool.query(
           `INSERT INTO users_data (employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief)
            VALUES ${placeholders}
            ON DUPLICATE KEY UPDATE
@@ -96,7 +114,7 @@ router.post('/csv', async (req, res) => {
         // Fallback: ทำทีละ row สำหรับ batch ที่ error
         for (const record of batch) {
           try {
-            await pool.execute(
+            await pool.query(
               `INSERT INTO users_data (employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief)
                VALUES (?, ?, ?, ?, ?, ?)
                ON DUPLICATE KEY UPDATE
@@ -138,11 +156,10 @@ router.post('/csv', async (req, res) => {
 });
 
 /**
- * DELETE /api/import/reset
+ * POST /api/import/reset
  * ล้างข้อมูลทั้งหมด (users_new ก่อน เพราะมี FK → users_data)
- * แล้ว import ข้อมูลใหม่จาก CSV
  */
-router.post('/reset', async (req, res) => {
+router.post('/reset', requireApiKey, async (req, res) => {
   try {
     // ลบ users_new ก่อน (มี FK reference ไป users_data)
     const [deletedNew] = await pool.execute('DELETE FROM users_new');

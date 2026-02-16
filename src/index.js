@@ -45,8 +45,12 @@ app.use(limiter);             // Rate limiting
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Static files - serve uploaded images
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Static files - serve uploaded images (cache 1 วัน)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
+  maxAge: '1d',
+  etag: true,
+  lastModified: true
+}));
 
 // Routes
 app.use('/api', apiRoutes);

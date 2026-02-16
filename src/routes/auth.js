@@ -3,6 +3,27 @@ import pool from '../config/database.js';
 
 const router = Router();
 
+// คอลัมน์ที่ใช้จริงใน users_new (ไม่ใช้ SELECT *)
+const USER_COLUMNS = `id, dept_id, dept_descr, sub_chief, employee_id, employee_firstname, employee_lastname, create_date, last_login, playing_status, url_image`;
+
+// Helper: สร้าง user response object
+function formatUser(row) {
+  return {
+    id: row.id,
+    dept_id: row.dept_id,
+    dept_descr: row.dept_descr,
+    sub_chief: row.sub_chief,
+    employee_id: row.employee_id,
+    employee_firstname: row.employee_firstname,
+    employee_lastname: row.employee_lastname,
+    employee_name: `${row.employee_firstname} ${row.employee_lastname}`,
+    create_date: row.create_date,
+    last_login: row.last_login,
+    playing_status: row.playing_status,
+    url_image: row.url_image
+  };
+}
+
 /**
  * POST /api/auth/login
  * Login สำหรับ Unity WebGL - ใช้แค่รหัสพนักงานเท่านั้น
@@ -55,7 +76,7 @@ router.post('/login', async (req, res) => {
 
     // Step 2: Check if user already exists in users_new
     const [existingUser] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
+      `SELECT ${USER_COLUMNS} FROM users_new WHERE employee_id = ?`,
       [employee_id]
     );
 
@@ -79,7 +100,7 @@ router.post('/login', async (req, res) => {
 
       // Get the newly created user
       const [newUser] = await pool.execute(
-        'SELECT * FROM users_new WHERE id = ?',
+        `SELECT ${USER_COLUMNS} FROM users_new WHERE id = ?`,
         [result.insertId]
       );
 
@@ -92,13 +113,8 @@ router.post('/login', async (req, res) => {
         [employee_id]
       );
 
-      // Get updated user
-      const [updatedUser] = await pool.execute(
-        'SELECT * FROM users_new WHERE employee_id = ?',
-        [employee_id]
-      );
-
-      user = updatedUser[0];
+      // ใช้ข้อมูลที่ SELECT มาแล้ว อัพเดทแค่ last_login
+      user = { ...existingUser[0], last_login: new Date() };
     }
 
     // Return success response
@@ -106,20 +122,7 @@ router.post('/login', async (req, res) => {
       success: true,
       message: isNewUser ? 'ลงทะเบียนสำเร็จ' : 'เข้าสู่ระบบสำเร็จ',
       isNewUser,
-      user: {
-        id: user.id,
-        dept_id: user.dept_id,
-        dept_descr: user.dept_descr,
-        sub_chief: user.sub_chief,
-        employee_id: user.employee_id,
-        employee_firstname: user.employee_firstname,
-        employee_lastname: user.employee_lastname,
-        employee_name: `${user.employee_firstname} ${user.employee_lastname}`, // Combined name
-        create_date: user.create_date,
-        last_login: user.last_login,
-        playing_status: user.playing_status,
-        url_image: user.url_image
-      }
+      user: formatUser(user)
     });
 
   } catch (error) {
@@ -150,7 +153,7 @@ router.get('/check/:employee_id', async (req, res) => {
 
     // Check in users_data
     const [usersData] = await pool.execute(
-      'SELECT employee_id, dept_id, dept_descr, employee_firstname, employee_lastname FROM users_data WHERE employee_id = ?',
+      'SELECT employee_id FROM users_data WHERE employee_id = ?',
       [employee_id]
     );
 
@@ -164,7 +167,7 @@ router.get('/check/:employee_id', async (req, res) => {
 
     // Check in users_new
     const [usersNew] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
+      `SELECT ${USER_COLUMNS} FROM users_new WHERE employee_id = ?`,
       [employee_id]
     );
 
@@ -172,17 +175,7 @@ router.get('/check/:employee_id', async (req, res) => {
       success: true,
       exists_in_system: true,
       registered: usersNew.length > 0,
-      user: usersNew.length > 0 ? {
-        id: usersNew[0].id,
-        dept_id: usersNew[0].dept_id,
-        dept_descr: usersNew[0].dept_descr,
-        employee_id: usersNew[0].employee_id,
-        employee_firstname: usersNew[0].employee_firstname,
-        employee_lastname: usersNew[0].employee_lastname,
-        employee_name: `${usersNew[0].employee_firstname} ${usersNew[0].employee_lastname}`,
-        playing_status: usersNew[0].playing_status,
-        url_image: usersNew[0].url_image
-      } : null
+      user: usersNew.length > 0 ? formatUser(usersNew[0]) : null
     });
 
   } catch (error) {
@@ -195,12 +188,12 @@ router.get('/check/:employee_id', async (req, res) => {
 });
 
 /**
- * PUT /api/auth/playing-status
+ * POST /api/auth/playing-status
  * อัพเดท playing_status เมื่อเล่นเกมเสร็จ
  * 
  * Body: { employee_id: string, playing_status: boolean }
  */
-router.put('/playing-status', async (req, res) => {
+router.post('/playing-status', async (req, res) => {
   try {
     const { employee_id, playing_status } = req.body;
 
@@ -221,7 +214,7 @@ router.put('/playing-status', async (req, res) => {
 
     // Check if user exists
     const [users] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
+      `SELECT playing_status FROM users_new WHERE employee_id = ?`,
       [employee_id]
     );
 
@@ -248,24 +241,14 @@ router.put('/playing-status', async (req, res) => {
 
     // Get updated user
     const [updatedUser] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
+      `SELECT ${USER_COLUMNS} FROM users_new WHERE employee_id = ?`,
       [employee_id]
     );
 
     res.json({
       success: true,
       message: 'อัพเดทสถานะสำเร็จ',
-      user: {
-        id: updatedUser[0].id,
-        dept_id: updatedUser[0].dept_id,
-        dept_descr: updatedUser[0].dept_descr,
-        employee_id: updatedUser[0].employee_id,
-        employee_firstname: updatedUser[0].employee_firstname,
-        employee_lastname: updatedUser[0].employee_lastname,
-        employee_name: `${updatedUser[0].employee_firstname} ${updatedUser[0].employee_lastname}`,
-        playing_status: updatedUser[0].playing_status,
-        url_image: updatedUser[0].url_image
-      }
+      user: formatUser(updatedUser[0])
     });
 
   } catch (error) {
@@ -297,7 +280,7 @@ router.post('/mark-played', async (req, res) => {
 
     // Check if user exists
     const [users] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
+      `SELECT ${USER_COLUMNS} FROM users_new WHERE employee_id = ?`,
       [employee_id]
     );
 
@@ -314,17 +297,7 @@ router.post('/mark-played', async (req, res) => {
         success: false,
         error: 'ผู้ใช้เล่นไปแล้ว',
         already_played: true,
-        user: {
-          id: users[0].id,
-          dept_id: users[0].dept_id,
-          dept_descr: users[0].dept_descr,
-          employee_id: users[0].employee_id,
-          employee_firstname: users[0].employee_firstname,
-          employee_lastname: users[0].employee_lastname,
-          employee_name: `${users[0].employee_firstname} ${users[0].employee_lastname}`,
-          playing_status: users[0].playing_status,
-          url_image: users[0].url_image
-        }
+        user: formatUser(users[0])
       });
     }
 
@@ -334,26 +307,13 @@ router.post('/mark-played', async (req, res) => {
       [employee_id]
     );
 
-    // Get updated user
-    const [updatedUser] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
-      [employee_id]
-    );
+    // ใช้ข้อมูลเดิม แค่อัพเดท playing_status (ไม่ต้อง SELECT ใหม่)
+    const updatedUser = { ...users[0], playing_status: 1 };
 
     res.json({
       success: true,
       message: 'บันทึกสถานะเล่นแล้วสำเร็จ',
-      user: {
-        id: updatedUser[0].id,
-        dept_id: updatedUser[0].dept_id,
-        dept_descr: updatedUser[0].dept_descr,
-        employee_id: updatedUser[0].employee_id,
-        employee_firstname: updatedUser[0].employee_firstname,
-        employee_lastname: updatedUser[0].employee_lastname,
-        employee_name: `${updatedUser[0].employee_firstname} ${updatedUser[0].employee_lastname}`,
-        playing_status: updatedUser[0].playing_status,
-        url_image: updatedUser[0].url_image
-      }
+      user: formatUser(updatedUser)
     });
 
   } catch (error) {

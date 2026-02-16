@@ -11,13 +11,17 @@ const __dirname = path.dirname(__filename);
 const envPath = path.join(__dirname, '../../.env');
 config({ path: envPath });
 
-// Debug: Log which values are being used
-console.log('📁 Loading .env from:', envPath);
-console.log('🔧 DB Config:', {
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || '(not set - using root)',
-  database: process.env.DB_NAME || 'ttbwebar_db'
-});
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Debug: Log เฉพาะ dev mode (ไม่ log credentials ใน production)
+if (!isProduction) {
+  console.log('📁 Loading .env from:', envPath);
+  console.log('🔧 DB Config:', {
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || '(not set - using root)',
+    database: process.env.DB_NAME || 'ttbwebar_db'
+  });
+}
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
@@ -26,10 +30,10 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'ttbwebar_db',
   waitForConnections: true,
-  connectionLimit: 100,        // เพิ่มจาก 10 → 100
-  queueLimit: 1000,            // รอคิวได้ 1000 requests
-  acquireTimeout: 30000,       // timeout 30 วินาที
-  idleTimeout: 60000           // ปิด connection ที่ไม่ใช้หลัง 60 วินาที
+  connectionLimit: 20,           // เหมาะกับ shared hosting (ไม่เกิน limit ของ server)
+  queueLimit: 500,               // รอคิวได้ 500 requests
+  acquireTimeout: 30000,         // timeout 30 วินาที
+  idleTimeout: 60000             // ปิด connection ที่ไม่ใช้หลัง 60 วินาที
 });
 
 // Test connection

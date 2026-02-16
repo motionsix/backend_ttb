@@ -13,6 +13,30 @@ const __dirname = path.dirname(__filename);
 // Upload directory
 const UPLOAD_DIR = path.join(__dirname, '../../uploads');
 
+// คอลัมน์ที่ใช้จริงใน users_new (ไม่ใช้ SELECT *)
+const USER_COLUMNS = `id, dept_id, dept_descr, sub_chief, employee_id, employee_firstname, employee_lastname, create_date, last_login, playing_status, url_image`;
+
+// Helper: สร้าง user response object (consistent กับ auth.js)
+function formatUser(row) {
+  return {
+    id: row.id,
+    dept_id: row.dept_id,
+    dept_descr: row.dept_descr,
+    sub_chief: row.sub_chief,
+    employee_id: row.employee_id,
+    employee_firstname: row.employee_firstname,
+    employee_lastname: row.employee_lastname,
+    employee_name: `${row.employee_firstname} ${row.employee_lastname}`,
+    create_date: row.create_date,
+    last_login: row.last_login,
+    playing_status: row.playing_status,
+    url_image: row.url_image
+  };
+}
+
+// Validate employee_id format (5 digits)
+const EMPLOYEE_ID_REGEX = /^\d{5}$/;
+
 // Create upload directory if not exists
 try {
   if (!fs.existsSync(UPLOAD_DIR)) {
@@ -49,6 +73,14 @@ router.post('/image', async (req, res) => {
       });
     }
 
+    // Validate employee_id format (5 digits) — consistent กับ auth.js
+    if (!EMPLOYEE_ID_REGEX.test(employee_id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'รหัสพนักงานต้องเป็นตัวเลข 5 หลัก'
+      });
+    }
+
     if (!image) {
       return res.status(400).json({
         success: false,
@@ -56,9 +88,9 @@ router.post('/image', async (req, res) => {
       });
     }
 
-    // Check if user exists
+    // Check if user exists (ใช้ explicit columns แทน SELECT *)
     const [users] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
+      `SELECT ${USER_COLUMNS} FROM users_new WHERE employee_id = ?`,
       [employee_id]
     );
 
@@ -71,15 +103,28 @@ router.post('/image', async (req, res) => {
     }
     console.log(`[Upload] ✅ User found: ${users[0].employee_firstname} ${users[0].employee_lastname}`);
 
+    // ลบรูปเก่าถ้ามี (ป้องกัน disk เต็ม)
+    if (users[0].url_image) {
+      const oldFilePath = path.join(__dirname, '../../', users[0].url_image);
+      try {
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+          console.log(`[Upload] 🗑️ Deleted old image: ${users[0].url_image}`);
+        }
+      } catch (delErr) {
+        console.warn(`[Upload] ⚠️ Could not delete old image: ${delErr.message}`);
+      }
+    }
+
     // Decode base64 image
     // Format: data:image/png;base64,xxxxx or just base64 string
     let base64Data = image;
     let extension = 'png';
 
     if (image.includes('data:image')) {
-      const matches = image.match(/^data:image\/(\w+);base64,(.+)$/);
+      const matches = image.match(/^data:image\/([\w+]+);base64,(.+)$/);
       if (matches) {
-        extension = matches[1];
+        extension = matches[1] === 'jpeg' ? 'jpg' : matches[1];
         base64Data = matches[2];
       }
     }
@@ -115,29 +160,16 @@ router.post('/image', async (req, res) => {
       [imageUrl, employee_id]
     );
 
-    // Get updated user
-    const [updatedUser] = await pool.execute(
-      'SELECT * FROM users_new WHERE employee_id = ?',
-      [employee_id]
-    );
+    // ใช้ข้อมูลเดิม + อัพเดท fields ที่เปลี่ยน (ไม่ต้อง SELECT ใหม่)
+    const updatedUser = { ...users[0], url_image: imageUrl, playing_status: 1 };
 
     console.log(`[Upload] ✅ Image saved: ${filename} for employee: ${employee_id}`);
-    console.log(`[Upload] ✅ Sending success response...`);
 
     res.json({
       success: true,
       message: 'อัพโหลดรูปสำเร็จ',
       url_image: imageUrl,
-      user: {
-        id: updatedUser[0].id,
-        dept_id: updatedUser[0].dept_id,
-        dept_descr: updatedUser[0].dept_descr,
-        employee_id: updatedUser[0].employee_id,
-        employee_firstname: updatedUser[0].employee_firstname,
-        employee_lastname: updatedUser[0].employee_lastname,
-        employee_name: `${updatedUser[0].employee_firstname} ${updatedUser[0].employee_lastname}`,
-        url_image: updatedUser[0].url_image
-      }
+      user: formatUser(updatedUser)
     });
 
   } catch (error) {
@@ -158,6 +190,14 @@ router.post('/image', async (req, res) => {
 router.get('/image/:employee_id', async (req, res) => {
   try {
     const { employee_id } = req.params;
+
+    // Validate employee_id format
+    if (!EMPLOYEE_ID_REGEX.test(employee_id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'รหัสพนักงานต้องเป็นตัวเลข 5 หลัก'
+      });
+    }
 
     const [users] = await pool.execute(
       'SELECT url_image FROM users_new WHERE employee_id = ?',
