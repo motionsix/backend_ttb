@@ -142,7 +142,7 @@ router.post('/csv', async (req, res) => {
  * ล้างข้อมูลทั้งหมด (users_new ก่อน เพราะมี FK → users_data)
  * แล้ว import ข้อมูลใหม่จาก CSV
  */
-router.delete('/reset', async (req, res) => {
+router.post('/reset', async (req, res) => {
   try {
     // ลบ users_new ก่อน (มี FK reference ไป users_data)
     const [deletedNew] = await pool.execute('DELETE FROM users_new');
