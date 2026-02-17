@@ -156,6 +156,157 @@ router.post('/csv', requireApiKey, async (req, res) => {
 });
 
 /**
+ * POST /api/import/sync
+ * Sync ข้อมูลพนักงาน — รองรับทั้ง 3 กรณี:
+ *   1. คนเข้าใหม่ → เพิ่มเข้า DB
+ *   2. อัพเดทข้อมูล → อัพเดทใน DB
+ *   3. คนออกไป → ลบออกจาก DB (ลบ users_new + รูปด้วย)
+ */
+router.post('/sync', requireApiKey, async (req, res) => {
+  try {
+    const csvPath = path.join(__dirname, '../data/data.csv');
+
+    if (!fs.existsSync(csvPath)) {
+      return res.status(404).json({ success: false, error: 'CSV file not found' });
+    }
+
+    const csvContent = fs.readFileSync(csvPath, 'utf-8');
+    const lines = csvContent.split('\n').filter(line => line.trim());
+    const dataLines = lines.slice(1); // skip header
+
+    // ── 1. Parse CSV ──
+    const csvRecords = [];
+    const csvEmployeeIds = new Set();
+    let parseSkipped = 0;
+
+    for (const line of dataLines) {
+      if (!line.trim()) continue;
+      const columns = line.split(',').map(col => col.trim());
+      if (columns.length < 6) { parseSkipped++; continue; }
+
+      const [employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief] = columns;
+      if (!employee_id || employee_id.length === 0) { parseSkipped++; continue; }
+
+      csvRecords.push({ employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief });
+      csvEmployeeIds.add(employee_id);
+    }
+
+    console.log(`[Sync] Parsed ${csvRecords.length} records from CSV`);
+
+    // ── 2. Import (เพิ่มใหม่ + อัพเดท) ──
+    let imported = 0;
+    const importErrors = [];
+
+    for (let i = 0; i < csvRecords.length; i += BATCH_SIZE) {
+      const batch = csvRecords.slice(i, i + BATCH_SIZE);
+      try {
+        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+        const values = batch.flatMap(r => [
+          r.employee_id, r.employee_firstname, r.employee_lastname,
+          r.dept_id, r.dept_descr, r.sub_chief
+        ]);
+
+        await pool.query(
+          `INSERT INTO users_data (employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief)
+           VALUES ${placeholders}
+           ON DUPLICATE KEY UPDATE
+             employee_firstname = VALUES(employee_firstname),
+             employee_lastname = VALUES(employee_lastname),
+             dept_id = VALUES(dept_id),
+             dept_descr = VALUES(dept_descr),
+             sub_chief = VALUES(sub_chief)`,
+          values
+        );
+        imported += batch.length;
+      } catch (err) {
+        // Fallback ทีละ row
+        for (const record of batch) {
+          try {
+            await pool.query(
+              `INSERT INTO users_data (employee_id, employee_firstname, employee_lastname, dept_id, dept_descr, sub_chief)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE
+                 employee_firstname = VALUES(employee_firstname),
+                 employee_lastname = VALUES(employee_lastname),
+                 dept_id = VALUES(dept_id),
+                 dept_descr = VALUES(dept_descr),
+                 sub_chief = VALUES(sub_chief)`,
+              [record.employee_id, record.employee_firstname, record.employee_lastname,
+               record.dept_id, record.dept_descr, record.sub_chief]
+            );
+            imported++;
+          } catch (rowErr) {
+            importErrors.push({ employee_id: record.employee_id, error: rowErr.message });
+          }
+        }
+      }
+    }
+
+    // ── 3. หาคนที่อยู่ใน DB แต่ไม่อยู่ใน CSV (คนออก) ──
+    const [allDbEmployees] = await pool.execute('SELECT employee_id FROM users_data');
+    const removedIds = allDbEmployees
+      .map(row => row.employee_id)
+      .filter(id => !csvEmployeeIds.has(id));
+
+    let removedCount = 0;
+    let removedPlayed = 0;
+    const removedErrors = [];
+    const UPLOAD_DIR = path.join(__dirname, '../../uploads');
+
+    for (const empId of removedIds) {
+      try {
+        // เช็คว่ามีใน users_new หรือไม่
+        const [userNew] = await pool.execute(
+          'SELECT employee_id, url_image, playing_status FROM users_new WHERE employee_id = ?',
+          [empId]
+        );
+
+        if (userNew.length > 0) {
+          // ลบรูปออกจาก disk ถ้ามี
+          if (userNew[0].url_image) {
+            const imgPath = path.join(UPLOAD_DIR, path.basename(userNew[0].url_image));
+            try {
+              if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+            } catch { /* skip */ }
+          }
+          if (userNew[0].playing_status) removedPlayed++;
+
+          // ลบ users_new ก่อน (FK constraint)
+          await pool.execute('DELETE FROM users_new WHERE employee_id = ?', [empId]);
+        }
+
+        // ลบ users_data
+        await pool.execute('DELETE FROM users_data WHERE employee_id = ?', [empId]);
+        removedCount++;
+      } catch (err) {
+        removedErrors.push({ employee_id: empId, error: err.message });
+      }
+    }
+
+    console.log(`[Sync] ✅ Done: ${imported} imported/updated, ${removedCount} removed (${removedPlayed} had played)`);
+
+    res.json({
+      success: true,
+      message: 'Sync completed',
+      summary: {
+        csv_total: csvRecords.length,
+        imported_or_updated: imported,
+        removed: removedCount,
+        removed_had_played: removedPlayed,
+        parse_skipped: parseSkipped,
+        errors: [...importErrors, ...removedErrors].length > 0
+          ? [...importErrors, ...removedErrors]
+          : undefined
+      }
+    });
+
+  } catch (error) {
+    console.error('Sync error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * POST /api/import/reset
  * ล้างข้อมูลทั้งหมด (users_new ก่อน เพราะมี FK → users_data)
  */
