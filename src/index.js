@@ -23,21 +23,21 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Rate Limiter - ป้องกัน spam
-// ⚠️ งาน event 3,000 คน share WiFi เดียวกัน = IP เดียวกัน
-// คนละ ~4 requests (login, check, upload, result) × 3,000 = 12,000 requests
+// ⚠️ งาน event 30,000 คน share WiFi เดียวกัน = IP เดียวกัน
+// คนละ ~4 requests (login, check, upload, result) × 30,000 = 120,000 requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 นาที
-  max: 15000,                 // 15,000 requests ต่อ window ต่อ IP (รองรับ 3,000+ คน share WiFi)
+  max: 150000,                // 150,000 requests ต่อ window ต่อ IP (รองรับ 30,000+ คน share WiFi)
   message: { success: false, error: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 // Upload Limiter - สำหรับ upload
-// งาน event: 3,000 คนอาจ share IP เดียวกัน → ต้องรองรับ 3,000+ uploads ต่อ window
+// งาน event: 30,000 คนอาจ share IP เดียวกัน → ต้องรองรับ 30,000+ uploads ต่อ window
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5000,                  // 5,000 uploads ต่อ 15 นาที ต่อ IP (รองรับ retake ด้วย)
+  max: 50000,                 // 50,000 uploads ต่อ 15 นาที ต่อ IP (รองรับ retake ด้วย)
   message: { success: false, error: 'Upload limit exceeded, please try again later.' },
 });
 

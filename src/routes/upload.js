@@ -38,8 +38,8 @@ function formatUser(row) {
 const EMPLOYEE_ID_REGEX = /^\d{5}$/;
 
 // ===== ป้องกันดิสก์เต็ม =====
-const MAX_FILE_SIZE = 5 * 1024 * 1024;            // จำกัดรูปละ 5MB
-const MAX_UPLOADS_FOLDER_SIZE = 3 * 1024 * 1024 * 1024; // จำกัด folder uploads ทั้งหมด 3GB (รองรับ ~6,000 รูป)
+const MAX_FILE_SIZE = 5 * 1024 * 1024;              // จำกัดรูปละ 5MB
+const MAX_UPLOADS_FOLDER_SIZE = 100 * 1024 * 1024 * 1024; // จำกัด folder uploads 100GB (รองรับ ~200,000 รูป, server มี 500GB)
 
 // คำนวณขนาด folder uploads ทั้งหมด
 function getUploadsFolderSize() {
