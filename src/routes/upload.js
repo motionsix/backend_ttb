@@ -231,6 +231,46 @@ router.post('/image', async (req, res) => {
 });
 
 /**
+ * GET /api/upload/gallery?limit=10
+ * ดึงรูปตัวอย่างล่าสุด (คนที่เล่นแล้ว + มีรูป)
+ * Query: limit (default 10, max 50)
+ */
+router.get('/gallery', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 50);
+
+    const [rows] = await pool.execute(
+      `SELECT employee_id, employee_firstname, employee_lastname, dept_descr, sub_chief, url_image, create_date
+       FROM users_new
+       WHERE playing_status = TRUE AND url_image IS NOT NULL
+       ORDER BY last_login DESC
+       LIMIT ?`,
+      [limit]
+    );
+
+    res.json({
+      success: true,
+      total: rows.length,
+      images: rows.map(row => ({
+        employee_id: row.employee_id,
+        employee_name: `${row.employee_firstname} ${row.employee_lastname}`,
+        dept_descr: row.dept_descr,
+        sub_chief: row.sub_chief,
+        url_image: row.url_image,
+        create_date: row.create_date
+      }))
+    });
+
+  } catch (error) {
+    console.error('Gallery error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'เกิดข้อผิดพลาด'
+    });
+  }
+});
+
+/**
  * GET /api/upload/image/:employee_id
  * ดึงรูปของ user
  */
